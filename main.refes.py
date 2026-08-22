@@ -5,7 +5,7 @@ import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -19,11 +19,11 @@ from telegram.ext import (
 # ============================================================
 
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-DESTINATION_CHAT_ID = "-1003076802840"  # Asegúrate de que el Bot sea ADMIN en este chat
+DESTINATION_CHAT_ID = "-1003076802840"  # ID de tu canal/grupo de destino
 DB_FILE = "refes.json"
 SPAIN_TZ = ZoneInfo("Europe/Madrid")
 
-# Cache temporal de álbumes: { media_group_id: [message1, message2, ...] }
+# Cache temporal de álbumes en memoria
 ALBUM_CACHE = {}
 
 # ============================================================
@@ -53,8 +53,8 @@ def guardar_datos(data):
 
 def sumar_refes(user_id: str, username: str, cantidad: int = 1):
     """
-    Suma 1 punto por cada PUBLICACIÓN de referencias enviada (o la cantidad pasada).
-    Se resetea automáticamente cada mes al usar 'mes_actual()' como clave.
+    Suma 'cantidad' referencias al total del mes.
+    Si se mandan 3 fotos de un álbum, 'cantidad' será 3.
     """
     data = cargar_datos()
     mes = mes_actual()
@@ -91,11 +91,11 @@ def obtener_refes_usuario(username_buscado: str):
     return 0
 
 # ============================================================
-# REGISTRAR FOTOS Y ÁLBUMES EN CACHE
+# REGISTRAR FOTOS EN CACHE
 # ============================================================
 
 async def guardar_foto_album(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Guarda fotos que formen parte de un álbum en la memoria temporal."""
+    """Captura cada foto que entra si pertenece a un álbum."""
     message = update.message
     if not message or not message.photo or not message.media_group_id:
         return
@@ -105,7 +105,7 @@ async def guardar_foto_album(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if album_id not in ALBUM_CACHE:
         ALBUM_CACHE[album_id] = []
 
-    # Evitar duplicados por mensaje id
+    # Evitamos duplicados
     if not any(msg.message_id == message.message_id for msg in ALBUM_CACHE[album_id]):
         ALBUM_CACHE[album_id].append(message)
 
@@ -118,24 +118,24 @@ async def refe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message:
         return
 
-    # Si se pasa un argumento: /refe @usuario o /refes @usuario
+    # 1. Consulta por usuario: /refe @usuario o /refes @usuario
     if context.args:
         target_user = context.args[0]
         cantidad = obtener_refes_usuario(target_user)
         await message.reply_text(f"🍒 El usuario {target_user} tiene **{cantidad}** referencia(s) este mes.", parse_mode="Markdown")
         return
 
-    # Si NO es respuesta a un mensaje
+    # 2. Comprobar respuesta a un mensaje
     replied = message.reply_to_message
     if not replied:
         await message.reply_text("❗ Debes responder a una imagen/álbum con `/refe` o usar `/refe @usuario` para consultar sus referencias.", parse_mode="Markdown")
         return
 
     if not replied.photo:
-        await message.reply_text("⚠️ El mensaje al que respondes debe contener una imagen.")
+        await message.reply_text("⚠️ El mensaje al que respondes debe ser una imagen.")
         return
 
-    # Datos del autor de la foto original
+    # Datos del usuario objetivo
     user = replied.from_user
     if not user:
         await message.reply_text("❌ No se pudo identificar al usuario de la foto.")
@@ -146,19 +146,15 @@ async def refe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fecha = replied.date.astimezone(SPAIN_TZ)
     hora = fecha.strftime("%H:%M:%S")
 
-    # Contar como 1 referencia subida
-    refes_totales = sumar_refes(user_id=user_id, username=username, cantidad=1)
-
-    # Identificar fotos (individual o álbum)
+    # Identificar si es un álbum o una foto individual
     album_id = replied.media_group_id
     fotos_file_ids = []
     caption = replied.caption or ""
 
     if album_id:
-        # Pausa para asegurar que lleguen todas las fotos del grupo
+        # Pausa para dar tiempo a que Telegram entregue todas las fotos del álbum
         await asyncio.sleep(1.2)
         album_messages = ALBUM_CACHE.get(album_id, [replied])
-        # Ordenar por el id de mensaje
         album_messages.sort(key=lambda m: m.message_id)
 
         for msg in album_messages:
@@ -168,19 +164,17 @@ async def refe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         fotos_file_ids.append(replied.photo[-1].file_id)
 
-    mensaje_txt = html.escape(caption) if caption else "Sin descripción"
+    # Texto del mensaje o por defecto "No hay mensaje"
+    mensaje_txt = html.escape(caption) if caption else "No hay mensaje"
 
-    # Plantilla
-    plantilla = (
-        "命        <b>𝐂𝐇𝐄𝐑𝐑𝐘'𝐒 𝐑𝐄𝐅𝐄𝐑𝐄𝐍𝐂𝐄𝐒.</b>\n\n"
-        " ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶\n"
-        f"୧   𝘂𝘀𝘂𝗮𝗿𝗶𝗼   :   {html.escape(username)}\n"
-        f"୧   𝗶𝗱   :   {user.id}\n"
-        f"୧   𝗵𝗼𝗿𝗮   :   {hora}\n"
-        f"୧   𝗺𝗲𝗻𝘀𝗮𝗷𝗲   :   {mensaje_txt}\n"
-        f"୧   𝗿𝗲𝗳𝗲𝘀   :   {refes_totales}\n\n"
-        "︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶"
-    )
+    # Calcular cuántas fotos son en total
+    total_fotos_nuevas = len(fotos_file_ids)
+
+    # Obtenemos las refes acumuladas actualizadas
+    refes_acumuladas = sumar_refes(user_id=user_id, username=username, cantidad=total_fotos_nuevas)
+
+    # La primera foto publicada tendrá el número inicial del contador
+    refes_inicio = refes_acumuladas - total_fotos_nuevas + 1
 
     botones = InlineKeyboardMarkup([
         [
@@ -189,43 +183,43 @@ async def refe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ])
 
+    # Enviar las fotos UNA POR UNA
     try:
-        # ENVIAR AL CHAT DE DESTINO
-        if len(fotos_file_ids) > 1:
-            # Es un álbum: construimos un MediaGroup
-            media_group = []
-            for idx, file_id in enumerate(fotos_file_ids):
-                # Solo agregamos la plantilla al primer elemento del álbum
-                if idx == 0:
-                    media_group.append(InputMediaPhoto(media=file_id, caption=plantilla, parse_mode="HTML"))
-                else:
-                    media_group.append(InputMediaPhoto(media=file_id))
+        for idx, photo_id in enumerate(fotos_file_ids):
+            # El número de refe sube con cada foto enviada
+            refe_actual = refes_inicio + idx
 
-            await context.bot.send_media_group(
-                chat_id=DESTINATION_CHAT_ID,
-                media=media_group
+            plantilla = (
+                "命        <b>𝐂𝐇𝐄𝐑𝐑𝐘'𝐒 𝐑𝐄𝐅𝐄𝐑𝐄𝐍𝐂𝐄𝐒.</b>\n\n"
+                " ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶\n"
+                f"୧   𝘂𝘀𝘂𝗮𝗿𝗶𝗼   :   {html.escape(username)}\n"
+                f"୧   𝗶𝗱   :   {user.id}\n"
+                f"୧   𝗵𝗼𝗿𝗮   :   {hora}\n"
+                f"୧   𝗺𝗲𝗻𝘀𝗮𝗷𝗲   :   {mensaje_txt}\n"
+                f"୧   𝗿𝗲𝗳𝗲𝘀   :   {refe_actual}\n\n"
+                "︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶"
             )
-        else:
-            # Foto individual
+
             await context.bot.send_photo(
                 chat_id=DESTINATION_CHAT_ID,
-                photo=fotos_file_ids[0],
+                photo=photo_id,
                 caption=plantilla,
                 parse_mode="HTML",
                 reply_markup=botones
             )
 
-        # Confirmación en el chat original
-        await message.reply_text("✅ Referencia publicada con éxito en el canal.")
+            # Pequeño delay de 0.4s para evitar que Telegram limite por Spam (FloodWait)
+            await asyncio.sleep(0.4)
 
-        # Limpiar cache si era un álbum
+        await message.reply_text(f"✅ Se han publicado {total_fotos_nuevas} referencia(s) en el canal.")
+
+        # Limpiar memoria del álbum
         if album_id:
             ALBUM_CACHE.pop(album_id, None)
 
     except Exception as e:
-        print(f"❌ Error al enviar la referencia: {e}")
-        await message.reply_text("❌ Hubo un error al reenviar la referencia.")
-
+        print(f"❌ Error al enviar las fotos: {e}")
+        await message.reply_text("❌ Ocurrió un error al enviar las fotos.")
 
 # ============================================================
 # INICIO DEL BOT
@@ -238,13 +232,10 @@ def main():
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # 1. Escuchar fotos para guardarlas en memoria en caso de álbumes
     app.add_handler(MessageHandler(filters.PHOTO, guardar_foto_album), group=0)
-
-    # 2. Comandos para activar la referencia (/refe y /refes)
     app.add_handler(CommandHandler(["refe", "refes"], refe_handler), group=1)
 
-    print("🚀 Bot de Referencias Cherry listo y corriendo...")
+    print("🚀 Bot listo y funcionando...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
