@@ -191,13 +191,13 @@ async def refe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             plantilla = (
                 "命        <b>𝐂𝐇𝐄𝐑𝐑𝐘'𝐒 𝐑𝐄𝐅𝐄𝐑𝐄𝐍𝐂𝐄𝐒.</b>\n\n"
-                " ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶\n"
+                " ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶\n"
                 f"୧   𝘂𝘀𝘂𝗮𝗿𝗶𝗼   :   {html.escape(username)}\n"
                 f"୧   𝗶𝗱   :   {user.id}\n"
                 f"୧   𝗵𝗼𝗿𝗮   :   {hora}\n"
                 f"୧   𝗺𝗲𝗻𝘀𝗮𝗷𝗲   :   {mensaje_txt}\n"
                 f"୧   𝗿𝗲𝗳𝗲𝘀   :   {refe_actual}\n\n"
-                "︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶"
+                "︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶"
             )
 
             await context.bot.send_photo(
