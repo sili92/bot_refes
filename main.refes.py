@@ -21,53 +21,57 @@ from telegram.ext import (
 
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 DESTINATION_CHAT_ID = "-1003076802840"
+
 DB_FILE = "refes.json"
 
-# Zona horaria española
 SPAIN_TZ = ZoneInfo("Europe/Madrid")
 
-# Aquí se guardan temporalmente los álbumes recibidos
+# Guardamos temporalmente las fotos de los álbumes
 ALBUM_CACHE = {}
 
 
 # ============================================================
-# FUNCIONES AUXILIARES
+# FUNCIONES
 # ============================================================
 
-def ahora_españa():
-    return datetime.now(SPAIN_TZ)
-
-
 def mes_actual():
-    return ahora_españa().strftime("%Y-%m")
+    return datetime.now(SPAIN_TZ).strftime("%Y-%m")
 
 
 def cargar_datos():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
 
-    return {}
+    if not os.path.exists(DB_FILE):
+        return {}
+
+    try:
+        with open(DB_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    except Exception as e:
+        print(f"❌ Error leyendo base de datos: {e}")
+        return {}
 
 
 def guardar_datos(data):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(
-            data,
-            f,
-            ensure_ascii=False,
-            indent=2
-        )
+
+    try:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(
+                data,
+                f,
+                ensure_ascii=False,
+                indent=2
+            )
+
+    except Exception as e:
+        print(f"❌ Error guardando base de datos: {e}")
 
 
 # ============================================================
-# RECIBIR FOTOS DE LOS ÁLBUMES
+# GUARDAR FOTOS DE LOS ÁLBUMES
 # ============================================================
 
-async def guardar_album(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def recibir_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     message = update.message
 
@@ -77,18 +81,28 @@ async def guardar_album(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message.photo:
         return
 
-    media_group_id = message.media_group_id
+    # --------------------------------------------------------
+    # FOTO QUE NO ES ÁLBUM
+    # --------------------------------------------------------
 
-    # Si no pertenece a un álbum, no hay nada que guardar aquí
-    if not media_group_id:
+    if not message.media_group_id:
+        print(
+            f"📷 Foto individual recibida: "
+            f"{message.message_id}"
+        )
         return
+
+    # --------------------------------------------------------
+    # ÁLBUM
+    # --------------------------------------------------------
+
+    album_id = message.media_group_id
 
     photo_id = message.photo[-1].file_id
 
-    # Crear el álbum si todavía no existe
-    if media_group_id not in ALBUM_CACHE:
+    if album_id not in ALBUM_CACHE:
 
-        ALBUM_CACHE[media_group_id] = {
+        ALBUM_CACHE[album_id] = {
             "photos": [],
             "caption": message.caption,
             "date": message.date,
@@ -109,25 +123,27 @@ async def guardar_album(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         }
 
-    album = ALBUM_CACHE[media_group_id]
+    album = ALBUM_CACHE[album_id]
 
     # Evitar duplicados
     if photo_id not in album["photos"]:
+
         album["photos"].append(photo_id)
 
         print(
-            f"📸 Álbum {media_group_id}: "
-            f"{len(album['photos'])} imagen(es)"
+            f"📸 ÁLBUM {album_id} → "
+            f"{len(album['photos'])} foto(s)"
         )
 
 
 # ============================================================
-# SUMAR REFERENCIAS
+# SUMAR REFES
 # ============================================================
 
 def sumar_refes(user_id, username, cantidad):
 
     data = cargar_datos()
+
     mes = mes_actual()
 
     if "mensual" not in data:
@@ -143,10 +159,8 @@ def sumar_refes(user_id, username, cantidad):
             "count": 0
         }
 
-    # Actualizar username
     data["mensual"][mes][user_id]["username"] = username
 
-    # Sumar todas las imágenes
     data["mensual"][mes][user_id]["count"] += cantidad
 
     guardar_datos(data)
@@ -155,21 +169,33 @@ def sumar_refes(user_id, username, cantidad):
 
 
 # ============================================================
-# OBTENER REFES DE UN USUARIO
+# OBTENER REFES
 # ============================================================
 
-def obtener_refes(user_id):
+def buscar_usuario(username):
 
     data = cargar_datos()
+
     mes = mes_actual()
 
-    return (
+    usuarios = (
         data
         .get("mensual", {})
         .get(mes, {})
-        .get(str(user_id), {})
-        .get("count", 0)
     )
+
+    username = username.replace("@", "").lower()
+
+    for user_id, info in usuarios.items():
+
+        guardado = str(
+            info.get("username", "")
+        ).replace("@", "").lower()
+
+        if guardado == username:
+            return user_id, info
+
+    return None, None
 
 
 # ============================================================
@@ -183,49 +209,26 @@ async def refe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message:
         return
 
+    print(
+        f"🟢 /refe recibido | "
+        f"message_id={message.message_id}"
+    )
+
 
     # ========================================================
-    # SI ES /REFE @USUARIO
+    # /REFE @USUARIO
     # ========================================================
 
     if context.args:
 
-        argumento = context.args[0].strip()
+        argumento = context.args[0]
 
         if argumento.startswith("@"):
             argumento = argumento[1:]
 
-        argumento = argumento.lower()
+        user_id, info = buscar_usuario(argumento)
 
-        data = cargar_datos()
-        mes = mes_actual()
-
-        usuarios = (
-            data
-            .get("mensual", {})
-            .get(mes, {})
-        )
-
-        encontrado = None
-
-        for user_id, info in usuarios.items():
-
-            username = str(
-                info.get("username", "")
-            ).replace("@", "").lower()
-
-            if username == argumento:
-
-                encontrado = (
-                    user_id,
-                    info
-                )
-
-                break
-
-        if encontrado:
-
-            user_id, info = encontrado
+        if info:
 
             username = info.get(
                 "username",
@@ -251,28 +254,28 @@ async def refe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     # ========================================================
-    # /REFE NORMAL
+    # /REFE RESPONDIENDO A UNA FOTO
     # ========================================================
 
     if not message.reply_to_message:
 
         await message.reply_text(
-            "❗ Responde a una imagen para referenciarla."
+            "❗ Responde a una imagen con /refe."
         )
 
         return
 
-    replied = message.reply_to_message
+    foto_original = message.reply_to_message
 
 
     # ========================================================
-    # COMPROBAR QUE SEA IMAGEN
+    # COMPROBAR FOTO
     # ========================================================
 
-    if not replied.photo:
+    if not foto_original.photo:
 
         await message.reply_text(
-            "⚠️ Solo se permiten imágenes."
+            "⚠️ Solo puedes referenciar imágenes."
         )
 
         return
@@ -282,118 +285,142 @@ async def refe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # USUARIO QUE MANDÓ LA FOTO
     # ========================================================
 
-    user = replied.from_user
+    usuario = foto_original.from_user
 
-    if not user:
+    if not usuario:
+        await message.reply_text(
+            "❌ No se pudo identificar al usuario."
+        )
         return
 
-    user_id = str(user.id)
+    user_id = str(usuario.id)
 
-    if user.username:
-        username = "@" + user.username
+    if usuario.username:
+
+        username = "@" + usuario.username
+
     else:
-        username = user.first_name
+
+        username = usuario.first_name
 
 
     # ========================================================
-    # OBTENER HORA ESPAÑOLA
+    # HORA ESPAÑOLA
     # ========================================================
 
-    hora = replied.date.astimezone(
+    hora = foto_original.date.astimezone(
         SPAIN_TZ
     ).strftime("%H:%M:%S")
 
 
     # ========================================================
-    # DETECTAR ÁLBUM
+    # BUSCAR FOTOS
     # ========================================================
 
-    media_group_id = replied.media_group_id
+    fotos = []
 
-    photos = []
+    album_id = foto_original.media_group_id
 
 
-    if media_group_id:
+    # ========================================================
+    # SI ES ÁLBUM
+    # ========================================================
+
+    if album_id:
 
         print(
-            f"🔎 Detectado álbum: {media_group_id}"
+            f"🔎 /refe pertenece al álbum {album_id}"
         )
 
-        # Esperamos a que lleguen todas las imágenes
-        # del álbum al bot.
-        for _ in range(5):
+        # Esperamos a que Telegram entregue
+        # todas las fotos del álbum.
+        for intento in range(10):
 
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
 
-            album = ALBUM_CACHE.get(
-                media_group_id
-            )
+            if album_id in ALBUM_CACHE:
 
-            if album:
-
-                photos = album["photos"].copy()
+                fotos = ALBUM_CACHE[
+                    album_id
+                ]["photos"].copy()
 
                 print(
-                    f"📸 Fotos encontradas: "
-                    f"{len(photos)}"
+                    f"🔎 Intento {intento + 1}: "
+                    f"{len(fotos)} foto(s)"
                 )
 
+            # Si ya tenemos fotos y han pasado
+            # al menos unos intentos, seguimos.
+            if intento >= 3 and fotos:
+                break
+
 
     # ========================================================
-    # FOTO INDIVIDUAL
+    # SI ES FOTO SOLA
     # ========================================================
 
-    if not photos:
+    if not fotos:
 
-        photos = [
-            replied.photo[-1].file_id
+        fotos = [
+            foto_original.photo[-1].file_id
         ]
 
+        print(
+            "📷 Es una foto individual."
+        )
+
 
     # ========================================================
-    # MENSAJE / CAPTION
+    # MENSAJE
     # ========================================================
 
-    mensaje = replied.caption
+    mensaje = foto_original.caption
 
-    if not mensaje and media_group_id:
+    # Si es álbum, el caption normalmente
+    # está solamente en la primera foto.
+    if not mensaje and album_id:
 
         album = ALBUM_CACHE.get(
-            media_group_id
+            album_id
         )
 
         if album:
+
             mensaje = album.get(
                 "caption"
             )
 
 
     if mensaje:
-        mensaje = html.escape(mensaje)
+
+        mensaje = html.escape(
+            mensaje
+        )
+
     else:
+
         mensaje = "No hay mensaje"
 
 
     # ========================================================
     # SUMAR REFES
     #
-    # 1 FOTO = 1 REFE
-    # 8 FOTOS = 8 REFES
+    # 1 FOTO = 1
+    # 8 FOTOS = 8
     # ========================================================
 
-    cantidad = len(photos)
+    cantidad = len(fotos)
 
-    refes_totales = sumar_refes(
+    total_refes = sumar_refes(
         user_id,
         username,
         cantidad
     )
 
-
     print(
-        f"🍒 {username} → "
+        f"🍒 {username}: "
         f"+{cantidad} refes | "
-        f"total mensual: {refes_totales}"
+        f"TOTAL: {total_refes}"
     )
 
 
@@ -404,18 +431,17 @@ async def refe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     plantilla = (
         "命         <b>𝐂𝐇𝐄𝐑𝐑𝐘'𝐒 𝐑𝐄𝐅𝐄𝐑𝐄𝐍𝐂𝐄𝐒.</b>\n"
         "\n"
-        " ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶\n"
+        "︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶\n"
         f"୧   <b>𝘂𝘀𝘂𝗮𝗿𝗶𝗼</b>   :   "
         f"{html.escape(username)}\n"
         f"୧   <b>𝗶𝗱</b>   :   "
-        f"{user.id}\n"
+        f"{usuario.id}\n"
         f"୧   <b>𝗵𝗼𝗿𝗮</b>   :   "
         f"{hora}\n"
         f"୧   <b>𝗺𝗲𝗻𝘀𝗮𝗷𝗲</b>   :   "
         f"{mensaje}\n"
         f"୧   <b>𝗿𝗲𝗳𝗲𝘀</b>   :   "
-        f"{refes_totales}\n"
-        "\n"
+        f"{total_refes}\n"
         "︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶"
     )
 
@@ -424,7 +450,7 @@ async def refe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # BOTONES
     # ========================================================
 
-    keyboard = InlineKeyboardMarkup([
+    botones = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
                 "𝙄𝙉𝙁𝙊𝙍𝙈𝘼𝙏𝙄𝙊𝙉",
@@ -439,43 +465,54 @@ async def refe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     # ========================================================
-    # ENVIAR AL OTRO CANAL
+    # ENVIAR LAS FOTOS
     #
-    # IMPORTANTE:
-    # Las imágenes se envían UNA POR UNA.
+    # SI ES ÁLBUM:
+    # FOTO 1
+    # FOTO 2
+    # FOTO 3
+    # ...
+    #
+    # UNA POR UNA
     # ========================================================
 
     try:
 
-        for index, photo_id in enumerate(photos):
+        print(
+            f"📤 Enviando {len(fotos)} foto(s)..."
+        )
 
-            # Cada imagen se manda individualmente
+        for numero, photo_id in enumerate(
+            fotos,
+            start=1
+        ):
+
+            print(
+                f"📤 Enviando foto "
+                f"{numero}/{len(fotos)}"
+            )
+
             await context.bot.send_photo(
                 chat_id=DESTINATION_CHAT_ID,
                 photo=photo_id,
                 caption=plantilla,
                 parse_mode="HTML",
-                reply_markup=keyboard
+                reply_markup=botones
             )
 
-            # Pequeña pausa para evitar problemas de flood
-            if index < len(photos) - 1:
-                await asyncio.sleep(0.3)
+            await asyncio.sleep(0.4)
 
 
         print(
-            f"✅ Enviadas {len(photos)} imagen(es)"
+            "✅ REFERENCIA ENVIADA CORRECTAMENTE"
         )
 
 
-        # ====================================================
-        # LIMPIAR ÁLBUM
-        # ====================================================
-
-        if media_group_id:
+        # Limpiar álbum
+        if album_id:
 
             ALBUM_CACHE.pop(
-                media_group_id,
+                album_id,
                 None
             )
 
@@ -483,11 +520,11 @@ async def refe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
 
         print(
-            f"❌ Error al enviar referencia: {e}"
+            f"❌ ERROR ENVIANDO FOTO: {e}"
         )
 
         await message.reply_text(
-            "❌ Error al enviar al canal."
+            f"❌ Error al enviar la referencia:\n{e}"
         )
 
 
@@ -498,8 +535,35 @@ async def refe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
 
     print(
-        "✅ Bot iniciándose correctamente..."
+        "================================"
     )
+
+    print(
+        "🍒 CHERRY'S REFES"
+    )
+
+    print(
+        "🤖 Bot iniciándose..."
+    )
+
+    print(
+        "================================"
+    )
+
+
+    if not BOT_TOKEN:
+
+        print(
+            "❌ NO EXISTE TELEGRAM_TOKEN"
+        )
+
+        return
+
+
+    print(
+        "✅ TELEGRAM_TOKEN encontrado"
+    )
+
 
     app = (
         ApplicationBuilder()
@@ -508,21 +572,22 @@ def main():
     )
 
 
-    # --------------------------------------------------------
-    # RECIBIR FOTOS DE ÁLBUMES
-    # --------------------------------------------------------
+    # ========================================================
+    # MUY IMPORTANTE:
+    # Este handler recibe las fotos de los álbumes.
+    # ========================================================
 
     app.add_handler(
         MessageHandler(
             filters.PHOTO,
-            guardar_album
+            recibir_fotos
         )
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # /REFE
-    # --------------------------------------------------------
+    # ========================================================
 
     app.add_handler(
         CommandHandler(
@@ -532,12 +597,23 @@ def main():
     )
 
 
-    # --------------------------------------------------------
-    # INICIAR
-    # --------------------------------------------------------
+    print(
+        "✅ Handlers cargados"
+    )
 
-    app.run_polling()
+    print(
+        "🚀 BOT ONLINE"
+    )
 
+
+    app.run_polling(
+        drop_pending_updates=True
+    )
+
+
+# ============================================================
+# EJECUTAR
+# ============================================================
 
 if __name__ == "__main__":
     main()
