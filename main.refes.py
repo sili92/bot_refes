@@ -52,10 +52,7 @@ def guardar_datos(data):
         print(f"❌ Error guardando {DB_FILE}: {e}")
 
 def sumar_refes(user_id: str, username: str, cantidad: int = 1):
-    """
-    Suma 'cantidad' referencias al total del mes.
-    Si se mandan 3 fotos de un álbum, 'cantidad' será 3.
-    """
+    """Suma 'cantidad' referencias al total del mes."""
     data = cargar_datos()
     mes = mes_actual()
 
@@ -152,9 +149,14 @@ async def refe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = replied.caption or ""
 
     if album_id:
-        # Pausa para dar tiempo a que Telegram entregue todas las fotos del álbum
-        await asyncio.sleep(1.2)
-        album_messages = ALBUM_CACHE.get(album_id, [replied])
+        # Pausa ampliada para garantizar recepción completa del álbum
+        await asyncio.sleep(2.0)
+        album_messages = ALBUM_CACHE.get(album_id, [])
+        
+        # Si la lista no contenía la foto respondida (ej. tras un reinicio del bot), la agregamos
+        if not any(m.message_id == replied.message_id for m in album_messages):
+            album_messages.append(replied)
+
         album_messages.sort(key=lambda m: m.message_id)
 
         for msg in album_messages:
@@ -186,7 +188,6 @@ async def refe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Enviar las fotos UNA POR UNA
     try:
         for idx, photo_id in enumerate(fotos_file_ids):
-            # El número de refe sube con cada foto enviada
             refe_actual = refes_inicio + idx
 
             plantilla = (
@@ -208,7 +209,6 @@ async def refe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=botones
             )
 
-            # Pequeño delay de 0.4s para evitar que Telegram limite por Spam (FloodWait)
             await asyncio.sleep(0.4)
 
         await message.reply_text(f"✅ Se han publicado {total_fotos_nuevas} referencia(s) en el canal.")
