@@ -178,7 +178,7 @@ async def refe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     botones = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("𝙄𝙉𝙁𝙊𝙍𝙈𝘼𝙏𝙄𝙊𝙉", url="https://x.com/cheerryspriv"),
+            InlineKeyboardButton("𝙄𝙉𝙁𝙊𝙍𝙈𝘼𝙏𝙄𝙊𝙉", url="https://t.me/infocherryspriv"),
             InlineKeyboardButton("𝙊𝙒𝙉𝙀𝙍", url="https://t.me/zilbato")
         ]
     ])
