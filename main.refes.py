@@ -118,18 +118,18 @@ async def refe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 1. Consulta por usuario: /refe @usuario o /refes @usuario
     if context.args:
         target_user = context.args[0]
-        cantidad = obtener_refes_usuario(target_user)
-        await message.reply_text(f"🍒 El usuario {target_user} tiene **{cantidad}** referencia(s) este mes.", parse_mode="Markdown")
+        # Nos aseguramos de mantener o colocar la @ si no la incluye
+        formatted_user = target_user if target_user.startswith("@") else f"@{target_user}"
+        cantidad = obtener_refes_usuario(formatted_user)
+        
+        texto_consulta = f"(⑅˘͈ ᵕ ˘͈ )  el usuario {formatted_user} cuenta\ncon {cantidad} referencia(s) este mes. ¡sigue así!"
+        await message.reply_text(texto_consulta)
         return
 
     # 2. Comprobar respuesta a un mensaje
     replied = message.reply_to_message
-    if not replied:
-        await message.reply_text("❗ Debes responder a una imagen/álbum con `/refe` o usar `/refe @usuario` para consultar sus referencias.", parse_mode="Markdown")
-        return
-
-    if not replied.photo:
-        await message.reply_text("⚠️ El mensaje al que respondes debe ser una imagen.")
+    if not replied or not replied.photo:
+        await message.reply_text("(๑´`๑)  debes responder a una\nfoto o álbum para enviar tu refe.")
         return
 
     # Datos del usuario objetivo
@@ -211,7 +211,8 @@ async def refe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await asyncio.sleep(0.4)
 
-        await message.reply_text(f"✅ Se han publicado {total_fotos_nuevas} referencia(s) en el canal.")
+        # Mensaje personalizado tras enviar la refe al canal
+        await message.reply_text("٩(ˊᗜˋ*)و   ¡gracias por tus refes!\n se han enviado al canal. ♡")
 
         # Limpiar memoria del álbum
         if album_id:
